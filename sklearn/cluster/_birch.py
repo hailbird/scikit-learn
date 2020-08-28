@@ -8,15 +8,22 @@ import numbers
 import numpy as np
 from scipy import sparse
 from math import sqrt
+from enum import Enum
 
 from ..metrics import pairwise_distances_argmin
 from ..metrics.pairwise import euclidean_distances
+from ..metrics.pairwise import manhattan_distances
 from ..base import TransformerMixin, ClusterMixin, BaseEstimator
 from ..utils import check_array
 from ..utils.extmath import row_norms
 from ..utils.validation import check_is_fitted, _deprecate_positional_args
 from ..exceptions import ConvergenceWarning
 from . import AgglomerativeClustering
+
+
+class DistanceType(Enum):
+    EUCLIDEAN = 1
+    MANHATTAN = 2
 
 
 def _iterate_sparse_X(X):
@@ -37,7 +44,7 @@ def _iterate_sparse_X(X):
         yield row
 
 
-def _split_node(node, threshold, branching_factor):
+def _split_node(node, threshold, branching_factor, distance_type):
     """The node has to be split if there is no place for a new subcluster
     in the node.
     1. Two empty nodes and two empty subclusters are initialized.
@@ -70,8 +77,12 @@ def _split_node(node, threshold, branching_factor):
         if node.next_leaf_ is not None:
             node.next_leaf_.prev_leaf_ = new_node2
 
-    dist = euclidean_distances(
-        node.centroids_, Y_norm_squared=node.squared_norm_, squared=True)
+    if distance_type == DistanceType.EUCLIDEAN:
+        dist = euclidean_distances(
+            node.centroids_, Y_norm_squared=node.squared_norm_, squared=True)
+    else:
+        dist = manhattan_distances(node.centroids_)
+
     n_clusters = dist.shape[0]
 
     farthest_idx = np.unravel_index(
@@ -136,11 +147,12 @@ class _CFNode:
         View of ``init_sq_norm_``.
 
     """
-    def __init__(self, *, threshold, branching_factor, is_leaf, n_features):
+    def __init__(self, *, threshold, branching_factor, is_leaf, n_features, distance_type=DistanceType.EUCLIDEAN):
         self.threshold = threshold
         self.branching_factor = branching_factor
         self.is_leaf = is_leaf
         self.n_features = n_features
+        self.distance_type = distance_type
 
         # The list of subclusters, centroids and squared norms
         # to manipulate throughout.
@@ -210,7 +222,7 @@ class _CFNode:
             # subcluster to accommodate the new child.
             else:
                 new_subcluster1, new_subcluster2 = _split_node(
-                    closest_subcluster.child_, threshold, branching_factor)
+                    closest_subcluster.child_, threshold, branching_factor, self.distance_type)
                 self.update_split_subclusters(
                     closest_subcluster, new_subcluster1, new_subcluster2)
 
@@ -435,12 +447,13 @@ class Birch(ClusterMixin, TransformerMixin, BaseEstimator):
     """
     @_deprecate_positional_args
     def __init__(self, *, threshold=0.5, branching_factor=50, n_clusters=3,
-                 compute_labels=True, copy=True):
+                 compute_labels=True, copy=True, distance_type=DistanceType.EUCLIDEAN):
         self.threshold = threshold
         self.branching_factor = branching_factor
         self.n_clusters = n_clusters
         self.compute_labels = compute_labels
         self.copy = copy
+        self.distance_type = distance_type
 
     def fit(self, X, y=None):
         """
@@ -482,7 +495,8 @@ class Birch(ClusterMixin, TransformerMixin, BaseEstimator):
             self.root_ = _CFNode(threshold=threshold,
                                  branching_factor=branching_factor,
                                  is_leaf=True,
-                                 n_features=n_features)
+                                 n_features=n_features,
+                                 distance_type=self.distance_type)
 
             # To enable getting back subclusters.
             self.dummy_leaf_ = _CFNode(threshold=threshold,
@@ -503,12 +517,13 @@ class Birch(ClusterMixin, TransformerMixin, BaseEstimator):
 
             if split:
                 new_subcluster1, new_subcluster2 = _split_node(
-                    self.root_, threshold, branching_factor)
+                    self.root_, threshold, branching_factor, self.distance_type)
                 del self.root_
                 self.root_ = _CFNode(threshold=threshold,
                                      branching_factor=branching_factor,
                                      is_leaf=False,
-                                     n_features=n_features)
+                                     n_features=n_features,
+                                     distance_type=self.distance_type)
                 self.root_.append_subcluster(new_subcluster1)
                 self.root_.append_subcluster(new_subcluster2)
 
@@ -614,7 +629,10 @@ class Birch(ClusterMixin, TransformerMixin, BaseEstimator):
             Transformed data.
         """
         check_is_fitted(self)
-        return euclidean_distances(X, self.subcluster_centers_)
+        if self.distance_type == DistanceType.EUCLIDEAN:
+            return euclidean_distances(X, self.subcluster_centers_)
+        else:
+            return manhattan_distances(X, self.subcluster_centers_)
 
     def _global_clustering(self, X=None):
         """

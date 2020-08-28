@@ -15,10 +15,12 @@ from ._optics import (OPTICS, cluster_optics_dbscan, compute_optics_graph,
                       cluster_optics_xi)
 from ._bicluster import SpectralBiclustering, SpectralCoclustering
 from ._birch import Birch
+from ._birch import DistanceType
 
 __all__ = ['AffinityPropagation',
            'AgglomerativeClustering',
            'Birch',
+           'DistanceType',
            'DBSCAN',
            'OPTICS',
            'cluster_optics_dbscan',
